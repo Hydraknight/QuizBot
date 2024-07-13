@@ -1,0 +1,13 @@
+[
+  {
+    "type": "multiple_choice",
+    "question": "What is the capital of France?",
+    "options": ["Paris", "London", "Berlin", "Madrid"],
+    "answer": "Paris"
+  },
+  {
+    "type": "true_false",
+    "question": "The sky is green.",
+    "answer": false
+  }
+]
