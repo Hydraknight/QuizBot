@@ -1,4 +1,5 @@
 import discord
+from discord import DiscordException, app_commands
 from discord.ui import Button, View
 from discord.ext import commands
 import dotenv
@@ -7,8 +8,8 @@ import os
 dotenv.load_dotenv()
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.Game(name="WT20 2024 Fantasy Auction")
-bot = commands.Bot(command_prefix="&", intents=intents, activity=activity)
+activity = discord.Game(name="Hosting Quizzes..")
+bot = commands.Bot(command_prefix="$", intents=intents, activity=activity)
 client = bot
 with open('questions.json') as f:
     questions = json.load(f)
@@ -20,6 +21,7 @@ score = {}
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
+    await bot.tree.sync()
 
 
 @client.event
@@ -27,31 +29,27 @@ async def on_message(message):
     if message.author == client.user:
         return
 
+
+@bot.hybrid_command(name="question", description="Asks a Question from the set.")
+@app_commands.describe(type="Type of question")
+async def ask_question(ctx, type: str):
     global current_question
-    global score
+    for question in questions:
+        if question['type'] == type:
+            current_question = question
+            break
+    embed = discord.Embed(
+        title="Question",
+        description=current_question['question'],
+        color=discord.Color.blue()
+    )
 
-    if message.content.startswith('$quiz'):
-        if not current_question:
-            current_question = questions[0]
-            await message.channel.send(current_question['question'])
-            if 'options' in current_question:
-                for i, option in enumerate(current_question['options']):
-                    await message.channel.send(f"{i+1}. {option}")
-        else:
-            await message.channel.send("Quiz already in progress!")
+    QuestionView = View()
+    QuestionView.add_item(
+        Button(label="Answer", style=discord.ButtonStyle.primary))
 
-    elif current_question:
-        if current_question['type'] == 'multiple_choice':
-            answer = current_question['options'][int(message.content) - 1]
-        elif current_question['type'] == 'true_false':
-            answer = message.content.lower() in ['true', 'yes', 'y']
+    await ctx.send(embed=embed, view=QuestionView)
+    # await ctx.send("Type /answer to answer the question.")
 
-        if answer == current_question['answer']:
-            score[message.author] = score.get(message.author, 0) + 1
-            await message.channel.send(f"Correct! Your score is {score[message.author]}")
-        else:
-            await message.channel.send("Incorrect!")
-
-        current_question = None
 
 client.run(os.getenv('TOKEN'))
