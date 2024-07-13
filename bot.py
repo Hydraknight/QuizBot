@@ -1,28 +1,28 @@
 import discord
-from discord import DiscordException, app_commands
+from discord import app_commands
 from discord.ui import Button, View
 from discord.ext import commands
 import dotenv
 import json
 import os
+
 dotenv.load_dotenv()
 intents = discord.Intents.default()
 intents.message_content = True
 activity = discord.Game(name="Hosting Quizzes..")
 bot = commands.Bot(command_prefix="$", intents=intents, activity=activity)
 client = bot
+
 with open('questions.json') as f:
     questions = json.load(f)
 
 current_question = None
 score = {}
 
-
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
     await bot.tree.sync()
-
 
 @client.event
 async def on_message(message):
@@ -37,19 +37,19 @@ correct_embed = discord.Embed(
 )
 already_answered = discord.Embed(
     title="Already Answered", description="You have already answered the question", color=discord.Color.red()
-
 )
-
 
 class QuestionView(View):
     def __init__(self, question):
         super().__init__(timeout=180.0)
         self.question = question
+        self.message = None  # Initialize the message attribute
 
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
-        await self.message.edit(view=self)
+        if self.message:
+            await self.message.edit(view=self)
 
     async def answer_check(self, interaction: discord.Interaction):
         if interaction.user.id in answered:
@@ -63,9 +63,7 @@ class QuestionView(View):
                 name="The Correct Answer is:", value=self.question['answer'])
             await interaction.response.send_message(embed=wrong_embed, ephemeral=True)
 
-
 answered = {}
-
 
 @bot.hybrid_command(name="question", description="Asks a Question from the set.")
 @app_commands.describe(ques_type="Type of question")
@@ -90,7 +88,7 @@ async def ask_question(ctx, ques_type: str):
             btn.callback = view.answer_check
             view.add_item(btn)
 
-        await ctx.send(embed=embed, view=view)
-
+        message = await ctx.send(embed=embed, view=view)
+        view.message = message  # Save the message object to the view for editing
 
 client.run(os.getenv('TOKEN'))
