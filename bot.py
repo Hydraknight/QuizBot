@@ -29,27 +29,68 @@ async def on_message(message):
     if message.author == client.user:
         return
 
+wrong_embed = discord.Embed(
+    title="Wrong Answer", description="You have selected the wrong answer", color=discord.Color.red()
+)
+correct_embed = discord.Embed(
+    title="Correct Answer", description="You have selected the correct answer", color=discord.Color.green()
+)
+already_answered = discord.Embed(
+    title="Already Answered", description="You have already answered the question", color=discord.Color.red()
+
+)
+
+
+class QuestionView(View):
+    def __init__(self, question):
+        super().__init__(timeout=180.0)
+        self.question = question
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        await self.message.edit(view=self)
+
+    async def answer_check(self, interaction: discord.Interaction):
+        if interaction.user.id in answered:
+            await interaction.response.send_message(embed=already_answered, ephemeral=True)
+            return
+        answered[interaction.user.id] = True
+        if interaction.data['custom_id'] == self.question['answer']:
+            await interaction.response.send_message(embed=correct_embed, ephemeral=True)
+        else:
+            wrong_embed.add_field(
+                name="The Correct Answer is:", value=self.question['answer'])
+            await interaction.response.send_message(embed=wrong_embed, ephemeral=True)
+
+
+answered = {}
+
 
 @bot.hybrid_command(name="question", description="Asks a Question from the set.")
-@app_commands.describe(type="Type of question")
-async def ask_question(ctx, type: str):
+@app_commands.describe(ques_type="Type of question")
+async def ask_question(ctx, ques_type: str):
     global current_question
     for question in questions:
-        if question['type'] == type:
+        if question['type'] == ques_type:
             current_question = question
             break
-    embed = discord.Embed(
-        title="Question",
-        description=current_question['question'],
-        color=discord.Color.blue()
-    )
+    question_text = current_question["question"]
 
-    QuestionView = View()
-    QuestionView.add_item(
-        Button(label="Answer", style=discord.ButtonStyle.primary))
+    if ques_type == "mcq":
+        global answered
+        answered = {}
+        view = QuestionView(current_question)
+        embed = discord.Embed(
+            title="Question", description=question_text, color=discord.Color.green())
 
-    await ctx.send(embed=embed, view=QuestionView)
-    # await ctx.send("Type /answer to answer the question.")
+        for answer in current_question["options"]:
+            btn = Button(
+                label=answer, style=discord.ButtonStyle.primary, custom_id=answer)
+            btn.callback = view.answer_check
+            view.add_item(btn)
+
+        await ctx.send(embed=embed, view=view)
 
 
 client.run(os.getenv('TOKEN'))
