@@ -9,5 +9,10 @@
     "type": "true_false",
     "question": "The sky is green.",
     "answer": false
+  },
+  {
+    "type": "guess",
+    "question": "Name the largest planet in our solar system",
+    "answer": "Jupiter"
   }
 ]

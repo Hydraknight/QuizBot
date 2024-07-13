@@ -5,6 +5,7 @@ from discord.ext import commands
 import dotenv
 import json
 import os
+from Levenshtein import distance
 
 dotenv.load_dotenv()
 intents = discord.Intents.default()
@@ -18,6 +19,7 @@ with open('questions.json') as f:
 
 current_question = None
 score = {}
+answered = {}
 
 @client.event
 async def on_ready():
@@ -30,13 +32,16 @@ async def on_message(message):
         return
 
 wrong_embed = discord.Embed(
-    title="Wrong Answer", description="You have selected the wrong answer", color=discord.Color.red()
+    title="Wrong Answer", description="Your answer is WRONG!", color=discord.Color.red()
 )
 correct_embed = discord.Embed(
-    title="Correct Answer", description="You have selected the correct answer", color=discord.Color.green()
+    title="Correct Answer", description="Your answer is RIGHT!", color=discord.Color.green()
 )
 already_answered = discord.Embed(
-    title="Already Answered", description="You have already answered the question", color=discord.Color.red()
+    title="Already Answered", description="You have already answered this question!", color=discord.Color.red()
+)
+question_closed = discord.Embed(
+    title="Question Closed", description="This question has already been answered correctly.", color=discord.Color.red()
 )
 
 class QuestionView(View):
@@ -58,12 +63,18 @@ class QuestionView(View):
         answered[interaction.user.id] = True
         if interaction.data['custom_id'] == self.question['answer']:
             await interaction.response.send_message(embed=correct_embed, ephemeral=True)
+            await self.close_question(interaction)
         else:
             wrong_embed.add_field(
                 name="The Correct Answer is:", value=self.question['answer'])
             await interaction.response.send_message(embed=wrong_embed, ephemeral=True)
 
-answered = {}
+    async def close_question(self, interaction: discord.Interaction):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            await self.message.edit(view=self)
+        current_question = None  # Reset the current question
 
 @bot.hybrid_command(name="question", description="Asks a Question from the set.")
 @app_commands.describe(ques_type="Type of question")
@@ -80,7 +91,7 @@ async def ask_question(ctx, ques_type: str):
         answered = {}
         view = QuestionView(current_question)
         embed = discord.Embed(
-            title="Question", description=question_text, color=discord.Color.green())
+            title="Question", description=question_text, color=discord.Color.greyple())
 
         for answer in current_question["options"]:
             btn = Button(
@@ -90,5 +101,29 @@ async def ask_question(ctx, ques_type: str):
 
         message = await ctx.send(embed=embed, view=view)
         view.message = message  # Save the message object to the view for editing
+    elif ques_type == "guess":
+        embed = discord.Embed(
+            title="Question", description=question_text, color=discord.Color.greyple())
+        await ctx.send(embed=embed)
+
+@bot.hybrid_command(name="answer", description="Submit your Answer to the question")
+@app_commands.describe(ans="Answer to the question")
+async def submit_answer(ctx, ans: str):
+    global current_question
+    if current_question["type"] == "guess":
+        guess = ans.lower()
+        correct = current_question["answer"].lower()
+        if distance(guess, correct) <= 2:
+            correct_embed.add_field(
+                name=f"{ctx.author}'s Answer:", value=ans)
+            await ctx.send(embed=correct_embed)
+            current_question = None
+        else:
+            wrong_embed.add_field(
+                name=f"{ctx.author}'s Answer:", value=ans)
+            await ctx.send(embed=wrong_embed)
+    else:
+        await ctx.send("This command is only for Guess type questions.")
+
 
 client.run(os.getenv('TOKEN'))
