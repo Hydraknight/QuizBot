@@ -20,6 +20,7 @@ with open('questions.json') as f:
 current_question = None
 score = {}
 answered = {}
+answered_right = []
 
 
 @client.event
@@ -34,6 +35,8 @@ async def on_message(message):
         return
     if current_question and current_question["type"] == "guess":
         await handle_guess_answer(message)
+    elif current_question and current_question["type"] == "multi":
+        await handle_multiple_answer(message)
 
 
 wrong_embed = discord.Embed(
@@ -113,6 +116,10 @@ async def ask_question(ctx, ques_type: str):
     elif ques_type == "guess":
         embed = discord.Embed(
             title="Question", description=question_text, color=discord.Color.greyple())
+        embed.add_field(name="Answer", value="Type your answer in the chat.")
+    elif ques_type == "multi":
+        embed = discord.Embed(
+            title="Question", description=question_text, color=discord.Color.greyple())
         await ctx.send(embed=embed)
 
 
@@ -129,6 +136,32 @@ async def handle_guess_answer(message):
         embed.add_field(name="Correct Answer:", value=correct)
         await message.channel.send(embed=embed)
         current_question = None
+
+
+async def handle_multiple_answer(message):
+    global current_question, answered_right
+    answered[message.author.id] = True
+    for word in [message.content.strip()]:
+        for num, answer in enumerate(current_question['answer']):
+            if answer not in answered_right:
+                correct = answer
+                dist = distance(word.lower(), correct.lower())
+                if dist/(len(correct)) <= 0.2:
+                    await message.reply(embed=correct_embed)
+                    embed = discord.Embed(
+                        title="Correct Answer", description=f"{message.author.mention} got part {num+1} of the question right!", color=discord.Color.green()
+                    )
+                    embed.add_field(name="Answer:", value=correct)
+                    answered_right.append(correct)
+                    await message.channel.send(embed=embed)
+                    if len(answered_right) == len(current_question['answer']):
+                        answered_right = []
+                        embed = discord.Embed(
+                            title="Question Complete", description=f"The question has been answered!", color=discord.Color.green()
+                        )
+                        await message.channel.send(embed=embed)
+                        current_question = None
+                    return
 
 
 @bot.hybrid_command(name="answer", description="Submit your Answer to the question")
@@ -174,15 +207,15 @@ async def add_question(ctx, ques_type: str, question: str, options: str = None, 
 
 
 @bot.hybrid_command(name="ask", description="Ask a question directly without adding to the set.")
-@app_commands.describe(ques_type="Type of question", question="The question text", image_url="URL of the image", options="Options for MCQ (comma separated)", answer="The correct answer")
-async def ask_direct_question(ctx, ques_type: str, question: str, image_url: str = None, options: str = None, answer: str = None):
+@app_commands.describe(ques_type="Type of question", question="The question text", image_url="URL of the image", options="Options for MCQ (comma separated)", answers="The correct answer")
+async def ask_direct_question(ctx, ques_type: str, question: str, image_url: str = None, options: str = None, answers: str = None):
     global current_question
-    current_question = {
-        "type": ques_type,
-        "question": question,
-        "answer": answer
-    }
     if ques_type == "mcq":
+        current_question = {
+            "type": ques_type,
+            "question": question,
+            "answer": answers
+        }
         current_question["options"] = options.split(',')
         global answered
         answered = {}
@@ -200,6 +233,23 @@ async def ask_direct_question(ctx, ques_type: str, question: str, image_url: str
         message = await ctx.channel.send(embed=embed, view=view)
         view.message = message  # Save the message object to the view for editing
     elif ques_type == "guess":
+        current_question = {
+            "type": ques_type,
+            "question": question,
+            "answer": answers
+        }
+        embed = discord.Embed(
+            title="Question", description=question, color=discord.Colour(0x1d1e21))
+        if image_url:
+            embed.set_image(url=image_url)
+        await ctx.send("Sending the question...", ephemeral=True, delete_after=3)
+        await ctx.channel.send(embed=embed)
+    elif ques_type == "multi":
+        current_question = {
+            "type": ques_type,
+            "question": question,
+            "answer": [answer.strip() for answer in answers.split(',')]
+        }
         embed = discord.Embed(
             title="Question", description=question, color=discord.Colour(0x1d1e21))
         if image_url:
