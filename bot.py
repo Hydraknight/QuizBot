@@ -26,6 +26,7 @@ team_order = []
 pounced = []
 correct_teams = []
 wrong_teams = []
+attempted = []
 # Define constants
 WRONG_ANSWER_PENALTY = -1
 CORRECT_ANSWER_POINTS = 2
@@ -73,6 +74,7 @@ class QuestionView(View):
         self.message = None  # Initialize the message attribute
 
         if self.mode == "bounce_pounce":
+            # embed mentioning the current team:
             self.add_item(
                 Button(label="Bounce", style=discord.ButtonStyle.danger, custom_id="bounce"))
             self.add_item(
@@ -119,11 +121,32 @@ class QuestionView(View):
         await interaction.channel.send(f"Team {team_order[current_team]} now has {team['score']} points.")
 
     async def bounce_question(self, interaction: discord.Interaction):
-        global current_team
+        global current_team, attempted, current_question, current_mode, correct_teams, wrong_teams
         user = interaction.user
         for team in teams:
             if user in teams[team]["members"] and team == team_order[current_team]:
-                current_team = (current_team + 1) % len(team_order)
+                if team_order[current_team] not in attempted:
+                    attempted.append(team_order[current_team])
+                if len(attempted) == len(team_order):
+                    current_team = (current_team + 1) % len(team_order)
+                    await interaction.response.send_message("All teams have attempted the question. It is now closed.")
+                    embed = discord.Embed(
+                        title="Question Closed", description="This question has been closed.", color=discord.Color.red()
+                    )
+                    teamlist = " ".join(correct_teams)
+                    embed.add_field(
+                        name=f"Teams who guessed right:", value=teamlist
+                    )
+                    await interaction.channel.send(embed=embed)
+                    current_question = None
+                    current_mode = None
+                    for team in correct_teams:
+                        await update_team_score(team, correct=True)
+                    for team in wrong_teams:
+                        await update_team_score(team, correct=False)
+                    correct_teams = []
+                    wrong_teams = []
+                    return
                 while team_order[current_team] in pounced:
                     current_team = (current_team + 1) % len(team_order)
                 await interaction.response.send_message(f"Question bounced to Team {team_order[current_team]}")
@@ -143,6 +166,7 @@ class QuestionView(View):
                         return False
                     await interaction.response.send_message(f"Team {team} has pounced! Answer using /answer.", ephemeral=True)
                     pounced.append(team)
+                    attempted.append(team)
                     return True
             return True
         return True
@@ -153,7 +177,6 @@ class QuestionView(View):
 async def ask_question(ctx, ques_type: str, mode: str = None):
     global current_question, current_team, answered, current_mode
     current_mode = mode
-    current_team = 0  # Reset to the first team for a new question
     answered = {}  # Clear answered list for new question
     for question in questions:
         if question['type'] == ques_type:
@@ -181,7 +204,10 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
         await ctx.send(embed=embed)
         if mode == "bounce_pounce":
             view = QuestionView(current_question, mode)
-            message = await ctx.send(view=view)
+            crt = discord.Embed(
+                title="Current Team", description=f"Team {team_order[current_team]}", color=discord.Color.green()
+            )
+            message = await ctx.send(embed=crt, view=view)
             view.message = message  # Save the message object to the view for editing
     elif ques_type == "multi":
         embed = discord.Embed(
@@ -246,16 +272,20 @@ async def handle_bounce_pounce(message):
         print(teams[teamname])
         print(message.author)
         if message.author in teams[teamname]["members"]:
-            print("correct")
-            correct_teams.append(teamname)
-            embed = correct_embed
-            teamlist = " ".join(correct_teams)
-            embed.add_field(
-                name=f"Teams who guessed right:", value=teamlist
-            )
+            if correct_teams != []:
+                teamlist = ", ".join(correct_teams)
+                embed = discord.Embed(
+                    title="Correct Answer", description=f"**Team {teamname}** got the correct answer!\n\n**Other teams that got the right answer**: {teamlist}", color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="Correct Answer", description=f"**Team {teamname}** was the only team to get the correct answer!", color=discord.Color.green()
+                )
             await message.channel.send(embed=embed)
+            embed = None
             current_question = None
             current_mode = None
+            current_team = (current_team + 1) % len(team_order)
             for team in correct_teams:
                 await update_team_score(team, correct=True)
             for team in wrong_teams:
