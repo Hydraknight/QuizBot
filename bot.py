@@ -1,3 +1,4 @@
+import random
 import discord
 from discord import app_commands
 from discord.ui import Button, View
@@ -31,6 +32,7 @@ pounced = []
 correct_teams = []
 wrong_teams = []
 attempted = []
+answered_right = []
 WRONG_ANSWER_PENALTY = -1
 CORRECT_ANSWER_POINTS = 2
 CURRENT_TEAM_KEY = "current_team"
@@ -250,11 +252,12 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
     global current_question, current_team, answered, current_mode
     current_mode = mode
     answered = {}
-    for question in questions:
-        if question['type'] == ques_type:
-            current_question = question
-            current_question["channel_id"] = ctx.channel.id
-            break
+    question = random.choice(questions)
+    # pick a random question:
+    while question["type"] != ques_type:
+        question = random.choice(questions)
+    current_question = question
+    current_question["channel_id"] = ctx.channel.id
 
     question_text = current_question["question"]
 
