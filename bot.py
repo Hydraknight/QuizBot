@@ -47,11 +47,13 @@ def pounce(team):
 async def on_ready():
     print(f'We have logged in as {client.user}')
     await bot.tree.sync()
+    await load()
 
 
 @client.event
 async def on_message(message):
     if message.author == client.user:
+        await save()
         return
     if current_mode == "bounce_pounce":
         await handle_bounce_pounce(message)
@@ -60,6 +62,85 @@ async def on_message(message):
             await handle_guess_answer(message)
         elif current_question and current_question["type"] == "multi":
             await handle_multiple_answer(message)
+
+
+async def load():
+    # load all variables from a single json file:
+    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    if not os.path.exists('data/save1.json'):
+        return
+    with open('data/save1.json') as f:
+        data = json.load(f)
+        questions = data["questions"]
+        current_question = data["current_question"]
+        teams = data["teams"]
+        current_mode = data["current_mode"]
+        start_time = data["start_time"]
+        current_team = data["current_team"]
+        rem_time = data["rem_time"]
+        team_order = data["team_order"]
+        pounced = data["pounced"]
+        correct_teams = data["correct_teams"]
+        wrong_teams = data["wrong_teams"]
+        attempted = data["attempted"]
+        WRONG_ANSWER_PENALTY = data["WRONG_ANSWER_PENALTY"]
+        CORRECT_ANSWER_POINTS = data["CORRECT_ANSWER_POINTS"]
+        answered = data["answered"]
+        print("loaded data")
+
+
+async def save():
+    # save all variables to a single json file:
+    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    # keep 5 save files, delete the oldest one and add the newest one:
+    # if no save files exist:
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    if not os.path.exists('data/save1.json'):
+        for i in range(1, 6):
+            with open(f'data/save{i}.json', 'w') as f:
+                json.dump({
+                    "questions": questions,
+                    "current_question": current_question,
+                    "teams": teams,
+                    "current_mode": current_mode,
+                    "start_time": start_time,
+                    "current_team": current_team,
+                    "rem_time": rem_time,
+                    "team_order": team_order,
+                    "pounced": pounced,
+                    "correct_teams": correct_teams,
+                    "wrong_teams": wrong_teams,
+                    "attempted": attempted,
+                    "WRONG_ANSWER_PENALTY": WRONG_ANSWER_PENALTY,
+                    "CORRECT_ANSWER_POINTS": CORRECT_ANSWER_POINTS,
+                    "answered": answered
+                }, f)
+        return
+
+    for i in range(4, 0, -1):
+        os.rename(f'data/save{i}.json', f'data/save{i+1}.json')
+    with open('data/save1.json', 'w') as f:
+        json.dump({
+            "questions": questions,
+            "current_question": current_question,
+            "teams": teams,
+            "current_mode": current_mode,
+            "start_time": start_time,
+            "current_team": current_team,
+            "rem_time": rem_time,
+            "team_order": team_order,
+            "pounced": pounced,
+            "correct_teams": correct_teams,
+            "wrong_teams": wrong_teams,
+            "attempted": attempted,
+            "WRONG_ANSWER_PENALTY": WRONG_ANSWER_PENALTY,
+            "CORRECT_ANSWER_POINTS": CORRECT_ANSWER_POINTS,
+            "answered": answered
+        }, f)
 
 # Embed declarations
 wrong_embed = discord.Embed(
@@ -134,7 +215,7 @@ class QuestionView(View):
 
     async def bounce_question(self, interaction: discord.Interaction):
         global current_team, attempted, current_question, current_mode, correct_teams, wrong_teams
-        user = interaction.user
+        user = interaction.user.id
         for team in teams:
             if user in teams[team]["members"] and team == team_order[current_team]:
                 await bounce_questions(interaction, self)
@@ -147,7 +228,7 @@ class QuestionView(View):
             await self.bounce_question(interaction)
             return False
         elif interaction.data['custom_id'] == "pounce":
-            user = interaction.user
+            user = interaction.user.id
             for team in teams:
                 if user in teams[team]["members"]:
                     for team_, timestamp in pounced:
@@ -172,7 +253,9 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
     for question in questions:
         if question['type'] == ques_type:
             current_question = question
+            current_question["channel_id"] = ctx.channel.id
             break
+
     question_text = current_question["question"]
 
     if ques_type == "mcq":
@@ -185,7 +268,7 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
                 label=answer, style=discord.ButtonStyle.primary, custom_id=answer)
             btn.callback = view.answer_check
             view.add_item(btn)
-
+        await save()
         message = await ctx.send(embed=embed, view=view)
         view.message = message
     elif ques_type == "guess":
@@ -199,6 +282,7 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
                                 team_order[current_team]}", color=discord.Color.green())
             message = await ctx.send(embed=crt, view=view)
             view.message = message
+            await save()
             await mute_current_team(ctx)
             await start_timers(ctx, view)
     elif ques_type == "multi":
@@ -209,6 +293,7 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
             view = QuestionView(current_question, mode)
             message = await ctx.send(view=view)
             view.message = message
+            await save()
 
 
 async def mute_current_team(ctx):
@@ -245,6 +330,7 @@ async def bounce_questions(ctx, view):
     if current_team_name not in attempted:
         attempted.append(current_team_name)
     if len(attempted) == len(team_order):
+
         current_team = (current_team + 1) % len(team_order)
         embed = discord.Embed(
             title="Question Closed", description="All teams have attempted the question. It is now closed.", color=discord.Color.blurple())
@@ -260,6 +346,7 @@ async def bounce_questions(ctx, view):
         current_question = None
         current_mode = None
         attempted = []
+        await save()
         await ctx.channel.send(embed=embed)
         return
     current_team = (current_team + 1) % len(team_order)
@@ -270,6 +357,7 @@ async def bounce_questions(ctx, view):
     for child in view.children:
         if child.label == "Pounce":
             view.remove_item(child)
+    await save()
     await ctx.channel.send(embed=crt, view=view)
     await start_timers(ctx, current_team, view)
 
@@ -284,9 +372,10 @@ async def handle_guess_answer(message):
         embed = discord.Embed(title="Correct Answer", description=f"{
                               message.author} got the correct answer!", color=discord.Color.green())
         embed.add_field(name="Correct Answer:", value=correct)
+        await save()
         await message.channel.send(embed=embed)
         current_question = None
-        await update_team_score(message.author.id, correct=True)
+        await update_team_score(message.author.id, message.channel.id, correct=True)
 
 
 async def handle_multiple_answer(message):
@@ -310,7 +399,7 @@ async def handle_multiple_answer(message):
                             title="Question Complete", description=f"The question has been answered!", color=discord.Color.green())
                         await message.channel.send(embed=embed)
                         current_question = None
-                        await update_team_score(message.author.id, correct=True)
+                        await update_team_score(message.author.id, message.channel.id, correct=True)
                     return
 
 
@@ -360,11 +449,11 @@ async def join_team(ctx, team_name: str):
     if team_name not in teams:
         await ctx.send("Team does not exist.")
     else:
-        teams[team_name]["members"].append(ctx.author)
+        teams[team_name]["members"].append(ctx.author.id)
         await ctx.send(f"{ctx.author.mention} joined Team {team_name}.")
 
 
-async def update_team_score(user_id, correct: bool):
+async def update_team_score(user_id, channel_id, correct: bool):
     team_name = None
     for team, details in teams.items():
         if user_id in details["members"]:
@@ -375,7 +464,10 @@ async def update_team_score(user_id, correct: bool):
             teams[team_name]["score"] += CORRECT_ANSWER_POINTS
         else:
             teams[team_name]["score"] += WRONG_ANSWER_PENALTY
-        await bot.get_channel(current_question["channel_id"]).send(f"Team {team_name} now has {teams[team_name]['score']} points.")
+        embed = discord.Embed(
+            title="Score Update", description=f"Team {team_name} now has {teams[team_name]['score']} points.", color=discord.Color(0x00ff00)
+        )
+        await bot.get_channel(channel_id).send(embed=embed)
 
 
 @bot.hybrid_command(name="answer", description="Submit your Answer to the question")
@@ -383,7 +475,7 @@ async def update_team_score(user_id, correct: bool):
 async def submit_answer(ctx, ans: str):
     global current_question, current_mode, current_team, correct_teams, wrong_teams, rem_time, answered
     if current_mode == "bounce_pounce":
-        user = ctx.author
+        user = ctx.author.id
         flag = 0
         for team, timestamp in pounced:
             if team not in answered:
@@ -451,7 +543,8 @@ async def ask_direct_question(ctx, ques_type: str, question: str, mode: str = No
         current_question = {
             "type": ques_type,
             "question": question,
-            "answer": answers
+            "answer": answers,
+            "channel_id": ctx.channel.id
         }
         current_question["options"] = options.split(',')
         global answered
@@ -473,7 +566,8 @@ async def ask_direct_question(ctx, ques_type: str, question: str, mode: str = No
         current_question = {
             "type": ques_type,
             "question": question,
-            "answer": answers
+            "answer": answers,
+            "channel_id": ctx.channel.id
         }
         embed = discord.Embed(
             title="Question", description=question, color=discord.Colour(0x1d1e21))
@@ -495,7 +589,8 @@ async def ask_direct_question(ctx, ques_type: str, question: str, mode: str = No
         current_question = {
             "type": ques_type,
             "question": question,
-            "answer": [answer.strip() for answer in answers.split(',')]
+            "answer": [answer.strip() for answer in answers.split(',')],
+            "channel_id": ctx.channel.id
         }
         embed = discord.Embed(
             title="Question", description=question, color=discord.Colour(0x1d1e21))
