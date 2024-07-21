@@ -25,6 +25,7 @@ score = {}
 teams = {}
 current_mode = None
 start_time = None
+total_time = 120
 current_team = 0
 rem_time = 0
 team_order = []
@@ -71,7 +72,7 @@ async def on_message(message):
 
 async def load():
     # load all variables from a single json file:
-    global questions, current_question, prelims_answers, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
 
     if not os.path.exists('data'):
         os.makedirs('data')
@@ -97,12 +98,13 @@ async def load():
         asked = data["asked"]
         prelims_answers = data["prelims_answers"]
         team_answers = data["team_answers"]
+        total_time = data["total_time"]
         print("loaded data")
 
 
 async def save():
     # save all variables to a single json file:
-    global questions, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     # keep 5 save files, delete the oldest one and add the newest one:
     # if no save files exist:
     if not os.path.exists('data'):
@@ -128,7 +130,8 @@ async def save():
                     "answered": answered,
                     "asked": asked,
                     "prelims_answers": prelims_answers,
-                    "team_answers": team_answers
+                    "team_answers": team_answers,
+                    "total_time": total_time
                 }, f)
         return
 
@@ -153,7 +156,8 @@ async def save():
             "answered": answered,
             "asked": asked,
             "prelims_answers": prelims_answers,
-            "team_answers": team_answers
+            "team_answers": team_answers,
+            "total_time": total_time
         }, f)
 
 # Embed declarations
@@ -260,7 +264,7 @@ class QuestionView(View):
 
 @bot.hybrid_command(name="reset", description="Resets the quiz settings")
 async def reset(ctx):
-    global questions, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     questions = []
     current_question = None
     teams = {}
@@ -278,6 +282,8 @@ async def reset(ctx):
     answered = {}
     asked = []
     prelims_answers = []
+    team_answers = {}
+    total_time = 120
     await save()
     await ctx.send("Quiz settings have been reset.")
 
@@ -335,9 +341,20 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
             await save()
 
 
+@bot.hybrid_command(name="time", description="Time remaining")
+async def time(ctx):
+    global start_time, total_time
+    if start_time:
+        elapsed = datetime.datetime.now() - start_time
+        remaining = total_time - elapsed.seconds
+        await ctx.send(f"Time remaining: {remaining} seconds.")
+    else:
+        await ctx.send("No question is currently active.")
+
+
 @bot.hybrid_command(name="prelims",  description="Prelims format")
 async def prelims(ctx):
-    global current_question, current_team, answered, current_mode
+    global current_question, current_team, answered, current_mode, start_time, total_time
     with open("prelims.json") as f:
         questions = json.load(f)
     answered = {}
@@ -345,11 +362,17 @@ async def prelims(ctx):
     # stop trying to get questions if all the prelims questions are asked:
     if len(asked) == len(questions):
         embed = discord.Embed(
-            title="All Questions have been asked", description="You have 2 minutes to answer all the questions.\n\nType all the answers in /answer.", color=discord.Color.red())
+            title="All Questions have been asked", description="You have 2 minutes to answer all the questions.\n\nType all the answers in /prelim_answer.", color=discord.Color.red())
         await ctx.send(embed=embed)
+        total_time = 40
+        await asyncio.sleep(total_time)
+        timeup = discord.Embed(
+            title="Time's Up!", description="Time's up! The answers are being checked.", color=discord.Color.red()
+        )
+        await handle_prelims(ctx)
+        await ctx.send(embed=timeup)
         return
     question = random.choice(questions)
-    # pick a random question:
     while question["mode"] != "prelims" or question["id"] in asked:
         question = random.choice(questions)
     current_question = question
@@ -357,26 +380,10 @@ async def prelims(ctx):
     prelims_answers.append(question["answer"])
     current_question["channel_id"] = ctx.channel.id
     question_text = current_question["question"]
-    if current_question["type"] == "mcq":
-        view = QuestionView(current_question, "prelims")
-        embed = discord.Embed(
-            title="Question", description=question_text, color=discord.Color.greyple())
-
-        for answer in current_question["options"]:
-            btn = Button(
-                label=answer, style=discord.ButtonStyle.primary, custom_id=answer)
-            btn.callback = view.answer_check
-            view.add_item(btn)
-        await save()
-        message = await ctx.send(embed=embed, view=view)
-        view.message = message
-    elif current_question["type"] == "guess":
+    if current_question["type"] == "guess" or current_question["type"] == "multi":
         embed = discord.Embed(
             title="Question", description=question_text, color=discord.Color.greyple())
         await ctx.send(embed=embed)
-        view = QuestionView(current_question, "prelims")
-        message = await ctx.send(view=view)
-        view.message = message
         await save()
 
 
@@ -513,6 +520,85 @@ async def handle_bounce_pounce(message):
             answered = {}
 
 
+async def handle_prelims(ctx):
+    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers
+    with open("prelims.json") as f:
+        questions = json.load(f)
+    # search for channel named quiz-log:
+    channel = discord.utils.get(ctx.guild.text_channels, name="quiz-log")
+    for team in team_answers:
+        embed = discord.Embed(
+            title=f"Team {team} Answers", description="The answers submitted by the team are:", color=discord.Color(0x00ffff)
+        )
+        await channel.send(embed=embed)
+        for i in range(len(questions)):
+            qid = asked[i]
+            for question in questions:
+                if question["id"] == qid:
+                    if team_answers[team][i] != None:
+                        guess = team_answers[team][i].lower()
+                        correct = question["answer"]
+                        dist = distance(guess, correct.lower())
+                        if dist/(len(correct)) <= 0.2:
+                            teams[team]["score"] += 2
+                            embed = discord.Embed(
+                                title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{question["answer"]}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.green()
+                            )
+                            await channel.send(embed=embed)
+                        else:
+                            embed = discord.Embed(
+                                title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{question["answer"]}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.red()
+                            )
+                            await channel.send(embed=embed)
+
+
+# command to  answer prelim questions. 20 optional fields, one for each question
+
+
+@bot.hybrid_command(name="prelim_answer", description="Submit your Answer to the question")
+@app_commands.describe(ans1="Answer to the question 1", ans2="Answer to the question 2", ans3="Answer to the question 3", ans4="Answer to the question 4", ans5="Answer to the question 5", ans6="Answer to the question 6", ans7="Answer to the question 7", ans8="Answer to the question 8", ans9="Answer to the question 9", ans10="Answer to the question 10", ans11="Answer to the question 11", ans12="Answer to the question 12", ans13="Answer to the question 13", ans14="Answer to the question 14", ans15="Answer to the question 15", ans16="Answer to the question 16", ans17="Answer to the question 17", ans18="Answer to the question 18", ans19="Answer to the question 19", ans20="Answer to the question 20")
+async def prelim_answer(ctx, ans1: str = None, ans2: str = None, ans3: str = None, ans4: str = None, ans5: str = None, ans6: str = None, ans7: str = None, ans8: str = None, ans9: str = None, ans10: str = None, ans11: str = None, ans12: str = None, ans13: str = None, ans14: str = None, ans15: str = None, ans16: str = None, ans17: str = None, ans18: str = None, ans19: str = None, ans20: str = None):
+    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers
+    uid = ctx.author.id
+    cid = ctx.channel.id
+    cteam = None
+    for team in teams:
+        if uid in teams[team]["members"]:
+            cteam = team
+            if cteam not in team_answers:
+                team_answers[cteam] = {}
+                for j in range(len(asked)):
+                    team_answers[cteam][j] = None
+                embed = discord.Embed(
+                    title="Answers Submitted", description="Your answers have been submitted.", color=discord.Color.green()
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                break
+            else:
+                embed = discord.Embed(
+                    title="Answers Updated", description="Your answers have been updated.", color=discord.Color.green()
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+    answers = [ans1, ans2, ans3, ans4, ans5, ans6, ans7, ans8, ans9, ans10,
+               ans11, ans12, ans13, ans14, ans15, ans15, ans16, ans17, ans18, ans19, ans20]
+    for i in range(len(asked)):
+        if team_answers[cteam] is {}:
+            for j in range(len(asked)):
+                team_answers[cteam][j] = None
+        elif answers[i] != None:
+            team_answers[cteam][i] = answers[i]
+    await save()
+
+
+@bot.hybrid_command(name="score", description="Get the score of a team.")
+@app_commands.describe(team_name="Name of the team")
+async def get_score(ctx, team_name: str):
+    if team_name in teams:
+        await ctx.send(f"Team {team_name} has {teams[team_name]['score']} points.")
+    else:
+        await ctx.send("Team does not exist.")
+
+
 @bot.hybrid_command(name="team", description="Register a new team.")
 @app_commands.describe(team_name="Name of the team")
 async def register_team(ctx, team_name: str):
@@ -520,9 +606,38 @@ async def register_team(ctx, team_name: str):
     if team_name in teams:
         await ctx.send("Team already exists.")
     else:
-        teams[team_name] = {"score": 0, "members": []}
+        # Create a new role with a random color
+        guild = ctx.guild
+        user = ctx.author
+        role_color = discord.Color(random.randint(0x000000, 0xFFFFFF))
+        new_role = await guild.create_role(name=f"Team {team_name}", color=role_color)
+        # generate a channel for the team:
+        category = discord.utils.get(
+            ctx.guild.categories, name="Team Channels")
+        if category is None:
+            category = await ctx.guild.create_category("Team Channels")
+        overwrites = {
+            ctx.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            new_role: discord.PermissionOverwrite(read_messages=True)
+        }
+        underscored_name = "-".join(team_name.split())
+        channel = await ctx.guild.create_text_channel(f"team-{underscored_name}", overwrites=overwrites, category=category)
+        await channel.send(f"New Channel has been made for {team_name}.")
+        # voice channel also:
+        category = discord.utils.get(
+            ctx.guild.categories, name="Team Voice Channels")
+        if category is None:
+            category = await ctx.guild.create_category("Team Voice Channels")
+        overwrites = {
+            ctx.guild.default_role: discord.PermissionOverwrite(connect=False),
+            new_role: discord.PermissionOverwrite(connect=True)
+        }
+        await ctx.guild.create_voice_channel(f"team-{underscored_name}", overwrites=overwrites, category=category)
+        # Add the new team to the teams dictionary
+        teams[team_name] = {"score": 0, "members": [], "role": new_role.id}
         team_order.append(team_name)
-        await ctx.send(f"Team {team_name} registered successfully.")
+
+        await ctx.send(f"Team {team_name} registered successfully with role {new_role.mention}.")
 
 
 @bot.hybrid_command(name="join", description="Join an existing team.")
@@ -532,7 +647,49 @@ async def join_team(ctx, team_name: str):
         await ctx.send("Team does not exist.")
     else:
         teams[team_name]["members"].append(ctx.author.id)
+        role = discord.utils.get(ctx.guild.roles, id=teams[team_name]["role"])
+        await ctx.author.add_roles(role)
+
         await ctx.send(f"{ctx.author.mention} joined Team {team_name}.")
+
+
+@bot.hybrid_command(name="leave", description="Leave your team.")
+async def leave_team(ctx):
+    global teams
+    user = ctx.author
+    for team, details in teams.items():
+        if user.id in details["members"]:
+            details["members"].remove(ctx.author.id)
+            await ctx.send(f"{ctx.author.mention} left Team {team}.")
+            role = discord.utils.get(
+                ctx.guild.roles, id=teams[team]["role"])
+            await user.remove_roles(role)
+            return
+    await ctx.send("You are not part of any team.")
+
+# remove team
+
+
+@bot.hybrid_command(name="remove_team", description="Remove a team.")
+@app_commands.describe(team_name="Name of the team to remove")
+async def remove_team(ctx, team_name: str):
+    if team_name not in teams:
+        await ctx.send("Team does not exist.")
+    else:
+        team = teams[team_name]
+        role = discord.utils.get(ctx.guild.roles, id=team["role"])
+        await role.delete()
+        # remove team channel:
+        for channel in ctx.guild.text_channels:
+            underscored_name = "-".join(team_name.split())
+            if channel.name == f"team-{underscored_name}":
+                await channel.delete()
+        for channel in ctx.guild.voice_channels:
+            underscored_name = "-".join(team_name.split())
+            if channel.name == f"team-{underscored_name}":
+                await channel.delete()
+        del teams[team_name]
+        await ctx.send(f"Team {team_name} has been removed.")
 
 
 async def update_team_score(user_id, channel_id, correct: bool):
@@ -579,31 +736,6 @@ async def submit_answer(ctx, ans: str):
             await ctx.send("You have not pounced on the question!", ephemeral=True)
             return
         await ctx.send("Your answer has been submitted.", ephemeral=True)
-    elif current_mode == "prelims":
-        global prelims_answers
-        uid = ctx.author.id
-        cid = ctx.channel.id
-        for team in teams:
-            if uid in teams[team]["members"]:
-                current_team = team
-
-        # if current_question["type"] == "guess":
-        #     guess = set(_.lower().strip() for _ in ans.split(","))
-        #     correct = set(_.lower() for _ in prelims_answers)
-        #     # find intersection of the 2, with some levenshtein distance for each answer:
-        #     correct_answers = []
-        #     for g in guess:
-        #         for c in correct:
-        #             if distance(g, c) <= 2:
-        #                 correct_answers.append(c)
-        #                 break
-        #     # intersection of correct and correct_answers:
-        #     correct_answers = set(correct_answers)
-        #     intersection = correct.intersection(correct_answers)
-        #     for i in range(len(intersection)):
-        #         await update_team_score(uid, cid, True)
-        #     for i in range(len(correct) - len(intersection)):
-        #         await update_team_score(uid, cid, False)
 
     else:
         if current_question["type"] == "guess":
