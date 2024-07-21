@@ -246,6 +246,28 @@ class QuestionView(View):
         return True
 
 
+@bot.hybrid_command(name="reset", description="Resets the quiz settings")
+async def reset(ctx):
+    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    questions = []
+    current_question = None
+    teams = {}
+    current_mode = None
+    start_time = None
+    current_team = 0
+    rem_time = 0
+    team_order = []
+    pounced = []
+    correct_teams = []
+    wrong_teams = []
+    attempted = []
+    WRONG_ANSWER_PENALTY = -1
+    CORRECT_ANSWER_POINTS = 2
+    answered = {}
+    await save()
+    await ctx.send("Quiz settings have been reset.")
+
+
 @bot.hybrid_command(name="question", description="Asks a Question from the set.")
 @app_commands.describe(ques_type="Type of question", mode="Mode of the question")
 async def ask_question(ctx, ques_type: str, mode: str = None):
