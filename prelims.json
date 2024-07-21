@@ -1,0 +1,16 @@
+[
+  {
+    "id": 4,
+    "type": "guess",
+    "mode": "prelims",
+    "question": "What is the capital of India?",
+    "answer": "New Delhi"
+  },
+  {
+    "id": 6,
+    "type": "guess",
+    "mode": "prelims",
+    "question": "What is the capital of Australia?",
+    "answer": "Canberra"
+  }
+]

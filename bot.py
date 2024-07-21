@@ -33,6 +33,9 @@ correct_teams = []
 wrong_teams = []
 attempted = []
 answered_right = []
+asked = []
+prelims_answers = []
+team_answers = {}
 WRONG_ANSWER_PENALTY = -1
 CORRECT_ANSWER_POINTS = 2
 CURRENT_TEAM_KEY = "current_team"
@@ -68,7 +71,7 @@ async def on_message(message):
 
 async def load():
     # load all variables from a single json file:
-    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, current_question, prelims_answers, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
 
     if not os.path.exists('data'):
         os.makedirs('data')
@@ -91,12 +94,15 @@ async def load():
         WRONG_ANSWER_PENALTY = data["WRONG_ANSWER_PENALTY"]
         CORRECT_ANSWER_POINTS = data["CORRECT_ANSWER_POINTS"]
         answered = data["answered"]
+        asked = data["asked"]
+        prelims_answers = data["prelims_answers"]
+        team_answers = data["team_answers"]
         print("loaded data")
 
 
 async def save():
     # save all variables to a single json file:
-    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     # keep 5 save files, delete the oldest one and add the newest one:
     # if no save files exist:
     if not os.path.exists('data'):
@@ -119,7 +125,10 @@ async def save():
                     "attempted": attempted,
                     "WRONG_ANSWER_PENALTY": WRONG_ANSWER_PENALTY,
                     "CORRECT_ANSWER_POINTS": CORRECT_ANSWER_POINTS,
-                    "answered": answered
+                    "answered": answered,
+                    "asked": asked,
+                    "prelims_answers": prelims_answers,
+                    "team_answers": team_answers
                 }, f)
         return
 
@@ -141,7 +150,10 @@ async def save():
             "attempted": attempted,
             "WRONG_ANSWER_PENALTY": WRONG_ANSWER_PENALTY,
             "CORRECT_ANSWER_POINTS": CORRECT_ANSWER_POINTS,
-            "answered": answered
+            "answered": answered,
+            "asked": asked,
+            "prelims_answers": prelims_answers,
+            "team_answers": team_answers
         }, f)
 
 # Embed declarations
@@ -248,7 +260,7 @@ class QuestionView(View):
 
 @bot.hybrid_command(name="reset", description="Resets the quiz settings")
 async def reset(ctx):
-    global questions, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     questions = []
     current_question = None
     teams = {}
@@ -264,6 +276,8 @@ async def reset(ctx):
     WRONG_ANSWER_PENALTY = -1
     CORRECT_ANSWER_POINTS = 2
     answered = {}
+    asked = []
+    prelims_answers = []
     await save()
     await ctx.send("Quiz settings have been reset.")
 
@@ -319,6 +333,51 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
             message = await ctx.send(view=view)
             view.message = message
             await save()
+
+
+@bot.hybrid_command(name="prelims",  description="Prelims format")
+async def prelims(ctx):
+    global current_question, current_team, answered, current_mode
+    with open("prelims.json") as f:
+        questions = json.load(f)
+    answered = {}
+    current_mode = "prelims"
+    # stop trying to get questions if all the prelims questions are asked:
+    if len(asked) == len(questions):
+        embed = discord.Embed(
+            title="All Questions have been asked", description="You have 2 minutes to answer all the questions.\n\nType all the answers in /answer.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    question = random.choice(questions)
+    # pick a random question:
+    while question["mode"] != "prelims" or question["id"] in asked:
+        question = random.choice(questions)
+    current_question = question
+    asked.append(question["id"])
+    prelims_answers.append(question["answer"])
+    current_question["channel_id"] = ctx.channel.id
+    question_text = current_question["question"]
+    if current_question["type"] == "mcq":
+        view = QuestionView(current_question, "prelims")
+        embed = discord.Embed(
+            title="Question", description=question_text, color=discord.Color.greyple())
+
+        for answer in current_question["options"]:
+            btn = Button(
+                label=answer, style=discord.ButtonStyle.primary, custom_id=answer)
+            btn.callback = view.answer_check
+            view.add_item(btn)
+        await save()
+        message = await ctx.send(embed=embed, view=view)
+        view.message = message
+    elif current_question["type"] == "guess":
+        embed = discord.Embed(
+            title="Question", description=question_text, color=discord.Color.greyple())
+        await ctx.send(embed=embed)
+        view = QuestionView(current_question, "prelims")
+        message = await ctx.send(view=view)
+        view.message = message
+        await save()
 
 
 async def mute_current_team(ctx):
@@ -400,7 +459,6 @@ async def handle_guess_answer(message):
         await save()
         await message.channel.send(embed=embed)
         current_question = None
-        await update_team_score(message.author.id, message.channel.id, correct=True)
 
 
 async def handle_multiple_answer(message):
@@ -424,7 +482,6 @@ async def handle_multiple_answer(message):
                             title="Question Complete", description=f"The question has been answered!", color=discord.Color.green())
                         await message.channel.send(embed=embed)
                         current_question = None
-                        await update_team_score(message.author.id, message.channel.id, correct=True)
                     return
 
 
@@ -522,6 +579,32 @@ async def submit_answer(ctx, ans: str):
             await ctx.send("You have not pounced on the question!", ephemeral=True)
             return
         await ctx.send("Your answer has been submitted.", ephemeral=True)
+    elif current_mode == "prelims":
+        global prelims_answers
+        uid = ctx.author.id
+        cid = ctx.channel.id
+        for team in teams:
+            if uid in teams[team]["members"]:
+                current_team = team
+
+        # if current_question["type"] == "guess":
+        #     guess = set(_.lower().strip() for _ in ans.split(","))
+        #     correct = set(_.lower() for _ in prelims_answers)
+        #     # find intersection of the 2, with some levenshtein distance for each answer:
+        #     correct_answers = []
+        #     for g in guess:
+        #         for c in correct:
+        #             if distance(g, c) <= 2:
+        #                 correct_answers.append(c)
+        #                 break
+        #     # intersection of correct and correct_answers:
+        #     correct_answers = set(correct_answers)
+        #     intersection = correct.intersection(correct_answers)
+        #     for i in range(len(intersection)):
+        #         await update_team_score(uid, cid, True)
+        #     for i in range(len(correct) - len(intersection)):
+        #         await update_team_score(uid, cid, False)
+
     else:
         if current_question["type"] == "guess":
             guess = ans.lower()
@@ -536,6 +619,7 @@ async def submit_answer(ctx, ans: str):
                 embed = wrong_embed
                 embed.add_field(name=f"{ctx.author}'s Answer:", value=ans)
                 await ctx.send(embed=embed)
+            embed = None
         else:
             await ctx.send("This command is only for Guess type questions.")
 

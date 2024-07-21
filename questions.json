@@ -1,26 +1,25 @@
 [
   {
+    "id": 1,
     "type": "mcq",
     "question": "What is the capital of France?",
     "options": ["Paris", "London", "Berlin", "Madrid"],
     "answer": "Paris"
   },
   {
+    "id": 2,
     "type": "true_false",
     "question": "The sky is green.",
     "answer": false
   },
   {
+    "id": 3,
     "type": "guess",
     "question": "Name the largest planet in our solar system",
     "answer": "Jupiter"
   },
   {
-    "type": "guess",
-    "question": "What is the capital of India?",
-    "answer": "New Delhi"
-  },
-  {
+    "id": 5,
     "type": "multi",
     "question": "Corning's Gorilla Glass is a strengthened glass which uses chemical processes and ion exchange mechanisms to strengthen their glass which is used on your phone's screen.\n\nHowever Corning was not the first company to discover this method to strengthen their glass. It was by another company X which was started in East Germany to produce glass cups. The glass they produced was so good that they struggled to get repeat buyers and even huge players in the market in need of glass, this phenomenon is known as Y. What are X and Y?",
     "answer": ["Superfest", "Planned obsolescence"]
