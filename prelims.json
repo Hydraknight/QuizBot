@@ -4,13 +4,20 @@
     "type": "guess",
     "mode": "prelims",
     "question": "What is the capital of India?",
-    "answer": "New Delhi"
+    "answer": ["New Delhi", "Delhi"]
   },
   {
     "id": 6,
     "type": "guess",
     "mode": "prelims",
     "question": "What is the capital of Australia?",
-    "answer": "Canberra"
+    "answer": ["Canberra"]
+  },
+  {
+    "id": 5,
+    "type": "multi",
+    "mode": "prelims",
+    "question": "Corning's Gorilla Glass is a strengthened glass which uses chemical processes and ion exchange mechanisms to strengthen their glass which is used on your phone's screen.\n\nHowever Corning was not the first company to discover this method to strengthen their glass. It was by another company X which was started in East Germany to produce glass cups. The glass they produced was so good that they struggled to get repeat buyers and even huge players in the market in need of glass, this phenomenon is known as Y. What are X and Y?",
+    "answer": ["Superfest", "Planned obsolescence"]
   }
 ]

@@ -1,4 +1,5 @@
 import random
+import subprocess
 import discord
 from discord import app_commands
 from discord.ui import Button, View
@@ -9,7 +10,7 @@ import os
 from Levenshtein import distance
 import asyncio  # Import asyncio for timers
 import datetime
-
+from matrix_generator import generate_matrix
 dotenv.load_dotenv()
 intents = discord.Intents.default()
 intents.message_content = True
@@ -24,7 +25,6 @@ current_question = None
 score = {}
 teams = {}
 current_mode = None
-start_time = None
 total_time = 120
 current_team = 0
 rem_time = 0
@@ -36,6 +36,7 @@ attempted = []
 answered_right = []
 asked = []
 prelims_answers = []
+answer_matrix = {}
 team_answers = {}
 WRONG_ANSWER_PENALTY = -1
 CORRECT_ANSWER_POINTS = 2
@@ -72,7 +73,7 @@ async def on_message(message):
 
 async def load():
     # load all variables from a single json file:
-    global questions, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, answer_matrix, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
 
     if not os.path.exists('data'):
         os.makedirs('data')
@@ -84,7 +85,6 @@ async def load():
         current_question = data["current_question"]
         teams = data["teams"]
         current_mode = data["current_mode"]
-        start_time = data["start_time"]
         current_team = data["current_team"]
         rem_time = data["rem_time"]
         team_order = data["team_order"]
@@ -99,12 +99,13 @@ async def load():
         prelims_answers = data["prelims_answers"]
         team_answers = data["team_answers"]
         total_time = data["total_time"]
+        answer_matrix = data["answer_matrix"]
         print("loaded data")
 
 
 async def save():
     # save all variables to a single json file:
-    global questions, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, answer_matrix, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     # keep 5 save files, delete the oldest one and add the newest one:
     # if no save files exist:
     if not os.path.exists('data'):
@@ -117,7 +118,6 @@ async def save():
                     "current_question": current_question,
                     "teams": teams,
                     "current_mode": current_mode,
-                    "start_time": start_time,
                     "current_team": current_team,
                     "rem_time": rem_time,
                     "team_order": team_order,
@@ -131,7 +131,8 @@ async def save():
                     "asked": asked,
                     "prelims_answers": prelims_answers,
                     "team_answers": team_answers,
-                    "total_time": total_time
+                    "total_time": total_time,
+                    "answer_matrix": answer_matrix
                 }, f)
         return
 
@@ -143,7 +144,6 @@ async def save():
             "current_question": current_question,
             "teams": teams,
             "current_mode": current_mode,
-            "start_time": start_time,
             "current_team": current_team,
             "rem_time": rem_time,
             "team_order": team_order,
@@ -157,7 +157,8 @@ async def save():
             "asked": asked,
             "prelims_answers": prelims_answers,
             "team_answers": team_answers,
-            "total_time": total_time
+            "total_time": total_time,
+            "answer_matrix": answer_matrix
         }, f)
 
 # Embed declarations
@@ -264,12 +265,11 @@ class QuestionView(View):
 
 @bot.hybrid_command(name="reset", description="Resets the quiz settings")
 async def reset(ctx):
-    global questions, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, answer_matrix, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     questions = []
     current_question = None
     teams = {}
     current_mode = None
-    start_time = None
     current_team = 0
     rem_time = 0
     team_order = []
@@ -283,6 +283,7 @@ async def reset(ctx):
     asked = []
     prelims_answers = []
     team_answers = {}
+    answer_matrix = {}
     total_time = 120
     await save()
     await ctx.send("Quiz settings have been reset.")
@@ -364,8 +365,21 @@ async def prelims(ctx):
         embed = discord.Embed(
             title="All Questions have been asked", description="You have 2 minutes to answer all the questions.\n\nType all the answers in /prelim_answer.", color=discord.Color.red())
         await ctx.send(embed=embed)
-        total_time = 40
-        await asyncio.sleep(total_time)
+        start_time = datetime.datetime.now()
+        total = total_time
+        # timer embed which constantly updates:
+        timer = discord.Embed(
+            title="Time Remaining", description=f"{total} seconds remaining.", color=discord.Color.red()
+        )
+        timer.set_thumbnail(
+            url="https://media1.tenor.com/m/HAa_YXwM-e4AAAAC/jam.gif")
+        timer_message = await ctx.send(embed=timer)
+        while total > 0:
+            await asyncio.sleep(10)
+            total -= 10
+            timer.description = f"{total} seconds remaining."
+            await timer_message.edit(embed=timer)
+        await timer_message.delete()
         timeup = discord.Embed(
             title="Time's Up!", description="Time's up! The answers are being checked.", color=discord.Color.red()
         )
@@ -521,7 +535,7 @@ async def handle_bounce_pounce(message):
 
 
 async def handle_prelims(ctx):
-    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers
+    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers, answer_matrix
     with open("prelims.json") as f:
         questions = json.load(f)
     # search for channel named quiz-log:
@@ -530,55 +544,109 @@ async def handle_prelims(ctx):
         embed = discord.Embed(
             title=f"Team {team} Answers", description="The answers submitted by the team are:", color=discord.Color(0x00ffff)
         )
+        answer_matrix[team] = [0] * len(questions)
         await channel.send(embed=embed)
         for i in range(len(questions)):
             qid = asked[i]
             for question in questions:
-                if question["id"] == qid:
-                    if team_answers[team][i] != None:
+                if question["id"] == qid and team_answers[team][i] != None:
+                    if question["type"] == "guess":
                         guess = team_answers[team][i].lower()
-                        correct = question["answer"]
-                        dist = distance(guess, correct.lower())
-                        if dist/(len(correct)) <= 0.2:
-                            teams[team]["score"] += 2
+                        correct_answers = question["answer"]
+                        flag = 0
+                        for correct in correct_answers:
+                            dist = distance(guess, correct.lower())
+                            if dist/(len(correct)) <= 0.2:
+                                teams[team]["score"] += 2
+                                flag = 1
+                                embed = discord.Embed(
+                                    title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.green()
+                                )
+                                await channel.send(embed=embed)
+                                answer_matrix[team][i] = 1
+                                break
+                        if flag == 0:
                             embed = discord.Embed(
-                                title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{question["answer"]}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.green()
+                                title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.red()
                             )
                             await channel.send(embed=embed)
-                        else:
-                            embed = discord.Embed(
-                                title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{question["answer"]}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.red()
-                            )
-                            await channel.send(embed=embed)
+                            answer_matrix[team][i] = 0
+                    elif question["type"] == "multi":
+                        attempt = list(team_answers[team][i].split(","))
+                        correct_answers = question["answer"]
+                        for guess in attempt:
 
+                            flag = 0
+                            for correct in correct_answers:
+                                dist = distance(
+                                    guess.lower().strip(), correct.lower().strip())
+                                if dist/(len(correct)) <= 0.2:
+                                    teams[team]["score"] += 1
+                                    flag = 1
+                                    embed = discord.Embed(
+                                        title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{correct}```**\n```Team's answer:```**```{guess}```**", color=discord.Color.green()
+                                    )
+                                    await channel.send(embed=embed)
+                                    answer_matrix[team][i] = 1
+                                    correct_answers.remove(correct)
+                                    break
+                            if flag == 0:
+                                embed = discord.Embed(
+                                    title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{guess}```**", color=discord.Color.red()
+                                )
+                                await channel.send(embed=embed)
+                                answer_matrix[team][i] = 0
+
+# answer matrix:
+
+
+@bot.hybrid_command(name="matrix", description="Shows the matrix of right and wrong answers")
+async def show_matrix(ctx):
+    global answer_matrix
+
+    # Generate the matrix image
+    output_path = 'answer_matrix.png'
+    generate_matrix(answer_matrix, output_path)
+
+    # Send the image to the Discord channel
+    with open(output_path, 'rb') as f:
+        picture = discord.File(f)
+        await ctx.send(file=picture)
 
 # command to  answer prelim questions. 20 optional fields, one for each question
 
 
-@bot.hybrid_command(name="prelim_answer", description="Submit your Answer to the question")
+@bot.hybrid_command(name="prelim_answer",  description="Submit your Answer to the question")
 @app_commands.describe(ans1="Answer to the question 1", ans2="Answer to the question 2", ans3="Answer to the question 3", ans4="Answer to the question 4", ans5="Answer to the question 5", ans6="Answer to the question 6", ans7="Answer to the question 7", ans8="Answer to the question 8", ans9="Answer to the question 9", ans10="Answer to the question 10", ans11="Answer to the question 11", ans12="Answer to the question 12", ans13="Answer to the question 13", ans14="Answer to the question 14", ans15="Answer to the question 15", ans16="Answer to the question 16", ans17="Answer to the question 17", ans18="Answer to the question 18", ans19="Answer to the question 19", ans20="Answer to the question 20")
 async def prelim_answer(ctx, ans1: str = None, ans2: str = None, ans3: str = None, ans4: str = None, ans5: str = None, ans6: str = None, ans7: str = None, ans8: str = None, ans9: str = None, ans10: str = None, ans11: str = None, ans12: str = None, ans13: str = None, ans14: str = None, ans15: str = None, ans16: str = None, ans17: str = None, ans18: str = None, ans19: str = None, ans20: str = None):
     global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers
     uid = ctx.author.id
     cid = ctx.channel.id
     cteam = None
+    if start_time == None:
+        await ctx.send("No question is currently active.", ephemeral=True)
+        return
     for team in teams:
         if uid in teams[team]["members"]:
             cteam = team
+            rem_time = total_time - \
+                (datetime.datetime.now() - start_time).seconds
             if cteam not in team_answers:
                 team_answers[cteam] = {}
                 for j in range(len(asked)):
                     team_answers[cteam][j] = None
+                # tell the remaining time:
                 embed = discord.Embed(
                     title="Answers Submitted", description="Your answers have been submitted.", color=discord.Color.green()
                 )
-                await ctx.send(embed=embed, ephemeral=True)
                 break
             else:
                 embed = discord.Embed(
                     title="Answers Updated", description="Your answers have been updated.", color=discord.Color.green()
                 )
-                await ctx.send(embed=embed, ephemeral=True)
+            embed.add_field(name="Remaining Time", value=f"{
+                rem_time} seconds", inline=False)
+            await ctx.send(embed=embed, ephemeral=True)
     answers = [ans1, ans2, ans3, ans4, ans5, ans6, ans7, ans8, ans9, ans10,
                ans11, ans12, ans13, ans14, ans15, ans15, ans16, ans17, ans18, ans19, ans20]
     for i in range(len(asked)):
