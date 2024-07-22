@@ -25,7 +25,8 @@ current_question = None
 score = {}
 teams = {}
 current_mode = None
-total_time = 120
+total_time = 20
+start_time = None
 current_team = 0
 rem_time = 0
 team_order = []
@@ -45,6 +46,10 @@ answered = {}  # Initialize answered dictionary
 
 
 def pounce(team):
+    """
+    This function is used to pounce on a question.
+    It adds the team and the current time to the pounced list.
+    """
     global pounced
     timestamp = datetime.datetime.now()
     pounced.append((team, timestamp))
@@ -72,7 +77,13 @@ async def on_message(message):
 
 
 async def load():
-    # load all variables from a single json file:
+    """
+    This function is called when a message is received.
+    It checks if the message is from the bot and if the current mode is "bounce_pounce".
+    If it is, it calls the handle_bounce_pounce function.
+    If it is not, it checks if the current question is of type "guess" and if it is, it calls the handle_guess_answer function.
+    If it is not, it checks if the current question is of type "multi" and if it is, it calls the handle_multiple_answer function.
+    """
     global questions, answer_matrix, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
 
     if not os.path.exists('data'):
@@ -104,10 +115,13 @@ async def load():
 
 
 async def save():
-    # save all variables to a single json file:
+    """
+    This function is used to save the data to the save files.
+    It checks if the data directory exists and if it does not, it creates it.
+    It then checks if the save files exist and if they do not, it creates them.
+    If they do, it saves the data to the save files.
+    """
     global questions, answer_matrix, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
-    # keep 5 save files, delete the oldest one and add the newest one:
-    # if no save files exist:
     if not os.path.exists('data'):
         os.makedirs('data')
     if not os.path.exists('data/save1.json'):
@@ -173,7 +187,49 @@ question_closed = discord.Embed(
 
 
 class QuestionView(View):
+    """
+    A class to represent a question view in a quiz bot.
+
+    ...
+
+    Attributes
+    ----------
+    question : dict
+        a dictionary containing question details
+    mode : str
+        the mode of the quiz (bounce_pounce or other)
+    message : discord.Message
+        the message object associated with the question
+    muted : bool
+        a flag indicating if the question is muted
+
+    Methods
+    -------
+    on_timeout():
+        Handles the timeout event for the question.
+    answer_check(interaction):
+        Checks the answer provided by the user.
+    close_question(interaction):
+        Closes the current question.
+    update_score(interaction, correct):
+        Updates the score of the team based on the answer.
+    bounce_question(interaction):
+        Handles the bounce event for the question.
+    interaction_check(interaction):
+        Checks the interaction event for the question.
+    """
+
     def __init__(self, question, mode):
+        """
+        Constructs all the necessary attributes for the question view object.
+
+        Parameters
+        ----------
+            question : dict
+                a dictionary containing question details
+            mode : str
+                the mode of the quiz (bounce_pounce or other)
+        """
         super().__init__(timeout=60.0)
         self.question = question
         self.mode = mode
@@ -187,6 +243,9 @@ class QuestionView(View):
                 Button(label="Bounce", style=discord.ButtonStyle.danger, custom_id="bounce"))
 
     async def on_timeout(self):
+        """
+        Handles the timeout event for the question. Disables the buttons after timeout.
+        """
         for child in self.children:
             if child.label == "Pounce":
                 child.disabled = True
@@ -199,6 +258,14 @@ class QuestionView(View):
                     await self.message.edit(view=self)
 
     async def answer_check(self, interaction: discord.Interaction):
+        """
+        Checks the answer provided by the user.
+
+        Parameters
+        ----------
+            interaction : discord.Interaction
+                the interaction event from the user
+        """
         if interaction.user.id in answered:
             await interaction.response.send_message(embed=already_answered, ephemeral=True)
             return
@@ -216,6 +283,14 @@ class QuestionView(View):
                 await self.bounce_question(interaction)
 
     async def close_question(self, interaction: discord.Interaction):
+        """
+        Closes the current question.
+
+        Parameters
+        ----------
+            interaction : discord.Interaction
+                the interaction event from the user
+        """
         for child in self.children:
             child.disabled = True
         if self.message:
@@ -225,6 +300,16 @@ class QuestionView(View):
         answered = {}
 
     async def update_score(self, interaction: discord.Interaction, correct: bool):
+        """
+        Updates the score of the team based on the answer.
+
+        Parameters
+        ----------
+            interaction : discord.Interaction
+                the interaction event from the user
+            correct : bool
+                a flag indicating if the answer was correct
+        """
         team = teams[team_order[current_team]]
         if correct:
             team["score"] += CORRECT_ANSWER_POINTS
@@ -233,6 +318,14 @@ class QuestionView(View):
         await interaction.channel.send(f"Team {team_order[current_team]} now has {team['score']} points.")
 
     async def bounce_question(self, interaction: discord.Interaction):
+        """
+        Handles the bounce event for the question.
+
+        Parameters
+        ----------
+            interaction : discord.Interaction
+                the interaction event from the user
+        """
         global current_team, attempted, current_question, current_mode, correct_teams, wrong_teams
         user = interaction.user.id
         for team in teams:
@@ -242,6 +335,19 @@ class QuestionView(View):
         await interaction.response.send_message("You are not allowed to bounce the question.", ephemeral=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        Checks the interaction event for the question.
+
+        Parameters
+        ----------
+            interaction : discord.Interaction
+                the interaction event from the user
+
+        Returns
+        -------
+            bool
+                True if the interaction is valid, False otherwise
+        """
         global rem_time
         if interaction.data['custom_id'] == "bounce":
             await self.bounce_question(interaction)
@@ -265,6 +371,14 @@ class QuestionView(View):
 
 @bot.hybrid_command(name="reset", description="Resets the quiz settings")
 async def reset(ctx):
+    """
+    Resets the quiz settings to their default values.
+
+    Parameters
+    ----------
+        ctx : context
+            The context in which the command was called.
+    """
     global questions, answer_matrix, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     questions = []
     current_question = None
@@ -292,6 +406,18 @@ async def reset(ctx):
 @bot.hybrid_command(name="question", description="Asks a Question from the set.")
 @app_commands.describe(ques_type="Type of question", mode="Mode of the question")
 async def ask_question(ctx, ques_type: str, mode: str = None):
+    """
+    Asks a question from the set based on the type and mode provided.
+
+    Parameters
+    ----------
+        ctx : context
+            The context in which the command was called.
+        ques_type : str
+            The type of the question to be asked.
+        mode : str, optional
+            The mode of the question to be asked.
+    """
     global current_question, current_team, answered, current_mode
     current_mode = mode
     answered = {}
@@ -344,6 +470,14 @@ async def ask_question(ctx, ques_type: str, mode: str = None):
 
 @bot.hybrid_command(name="time", description="Time remaining")
 async def time(ctx):
+    """
+    Sends a message with the remaining time for the current question.
+
+    Parameters
+    ----------
+        ctx : context
+            The context in which the command was called.
+    """
     global start_time, total_time
     if start_time:
         elapsed = datetime.datetime.now() - start_time
@@ -355,6 +489,14 @@ async def time(ctx):
 
 @bot.hybrid_command(name="prelims",  description="Prelims format")
 async def prelims(ctx):
+    """
+    Handles the prelims format of the quiz.
+
+    Parameters
+    ----------
+        ctx : context
+            The context in which the command was called.
+    """
     global current_question, current_team, answered, current_mode, start_time, total_time
     with open("prelims.json") as f:
         questions = json.load(f)
@@ -366,6 +508,7 @@ async def prelims(ctx):
             title="All Questions have been asked", description="You have 2 minutes to answer all the questions.\n\nType all the answers in /prelim_answer.", color=discord.Color.red())
         await ctx.send(embed=embed)
         start_time = datetime.datetime.now()
+        total_time = 20
         total = total_time
         # timer embed which constantly updates:
         timer = discord.Embed(
@@ -402,6 +545,14 @@ async def prelims(ctx):
 
 
 async def mute_current_team(ctx):
+    """
+    Mutes the current team in the Discord server for 1 minute.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+    """
     current_team_name = team_order[current_team]
     current_team_members = teams[current_team_name]["members"]
     role = discord.utils.get(ctx.guild.roles, name="Muted")
@@ -412,6 +563,14 @@ async def mute_current_team(ctx):
 
 
 async def unmute_current_team(ctx):
+    """
+    Unmutes the current team in the Discord server after a delay of 60 seconds.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+    """
     await asyncio.sleep(60)
     current_team_name = team_order[current_team]
     current_team_members = teams[current_team_name]["members"]
@@ -422,6 +581,18 @@ async def unmute_current_team(ctx):
 
 
 async def start_timers(ctx, team, view):
+    """
+    Starts a 30-second timer for the current team to answer the question.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+    team : str
+        The name of the current team.
+    view : discord.ui.View
+        The view object for the Discord UI.
+    """
     await ctx.channel.send("You have 30 seconds to answer the question.")
     await asyncio.sleep(30)
     global current_team, current_question
@@ -430,6 +601,17 @@ async def start_timers(ctx, team, view):
 
 
 async def bounce_questions(ctx, view):
+    """
+    Handles the logic of bouncing questions from one team to another.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+    view : discord.ui.View
+        The view object for the Discord UI.
+    """
+
     global current_team, attempted, current_question, current_mode, pounced
     current_team_name = team_order[current_team]
     if current_team_name not in attempted:
@@ -468,6 +650,14 @@ async def bounce_questions(ctx, view):
 
 
 async def handle_guess_answer(message):
+    """
+    Handles the logic of a team guessing an answer.
+
+    Parameters
+    ----------
+    message : discord.Message
+        The message object that contains the team's guess.
+    """
     global current_question
     guess = message.content.lower()
     correct = current_question["answer"]
@@ -483,6 +673,14 @@ async def handle_guess_answer(message):
 
 
 async def handle_multiple_answer(message):
+    """
+    Handles questions with multiple answers.
+
+    Parameters
+    ----------
+    message : discord.Message
+        The message object that contains the team's guess.
+    """
     global current_question, answered_right
     answered[message.author.id] = True
     for word in [message.content.strip()]:
@@ -507,6 +705,14 @@ async def handle_multiple_answer(message):
 
 
 async def handle_bounce_pounce(message):
+    """
+    Handles the logic of a team bouncing or pouncing an answer.
+
+    Parameters
+    ----------
+    message : discord.Message
+        The message object that contains the team's guess.
+    """
     global current_question, current_team, current_mode, correct_teams, wrong_teams, answered
     guess = message.content.lower()
     correct = current_question["answer"]
@@ -535,6 +741,15 @@ async def handle_bounce_pounce(message):
 
 
 async def handle_prelims(ctx):
+    """
+    Handles the prelims format of the quiz.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+
+    """
     global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers, answer_matrix
     with open("prelims.json") as f:
         questions = json.load(f)
@@ -574,12 +789,13 @@ async def handle_prelims(ctx):
                     elif question["type"] == "multi":
                         attempt = list(team_answers[team][i].split(","))
                         correct_answers = question["answer"]
+                        answer_matrix[team][i] = 0
                         for guess in attempt:
-
+                            guess = guess.strip()
                             flag = 0
                             for correct in correct_answers:
                                 dist = distance(
-                                    guess.lower().strip(), correct.lower().strip())
+                                    guess.lower(), correct.lower().strip())
                                 if dist/(len(correct)) <= 0.2:
                                     teams[team]["score"] += 1
                                     flag = 1
@@ -587,15 +803,16 @@ async def handle_prelims(ctx):
                                         title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{correct}```**\n```Team's answer:```**```{guess}```**", color=discord.Color.green()
                                     )
                                     await channel.send(embed=embed)
-                                    answer_matrix[team][i] = 1
+                                    answer_matrix[team][i] = 2
                                     correct_answers.remove(correct)
+                                    if correct_answers == []:
+                                        answer_matrix[team][i] = 1
                                     break
                             if flag == 0:
                                 embed = discord.Embed(
                                     title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{guess}```**", color=discord.Color.red()
                                 )
                                 await channel.send(embed=embed)
-                                answer_matrix[team][i] = 0
 
 # answer matrix:
 
@@ -619,6 +836,15 @@ async def show_matrix(ctx):
 @bot.hybrid_command(name="prelim_answer",  description="Submit your Answer to the question")
 @app_commands.describe(ans1="Answer to the question 1", ans2="Answer to the question 2", ans3="Answer to the question 3", ans4="Answer to the question 4", ans5="Answer to the question 5", ans6="Answer to the question 6", ans7="Answer to the question 7", ans8="Answer to the question 8", ans9="Answer to the question 9", ans10="Answer to the question 10", ans11="Answer to the question 11", ans12="Answer to the question 12", ans13="Answer to the question 13", ans14="Answer to the question 14", ans15="Answer to the question 15", ans16="Answer to the question 16", ans17="Answer to the question 17", ans18="Answer to the question 18", ans19="Answer to the question 19", ans20="Answer to the question 20")
 async def prelim_answer(ctx, ans1: str = None, ans2: str = None, ans3: str = None, ans4: str = None, ans5: str = None, ans6: str = None, ans7: str = None, ans8: str = None, ans9: str = None, ans10: str = None, ans11: str = None, ans12: str = None, ans13: str = None, ans14: str = None, ans15: str = None, ans16: str = None, ans17: str = None, ans18: str = None, ans19: str = None, ans20: str = None):
+    """
+    Submit the answers to the prelims questions.
+
+    Parameters:
+    ctx: context
+        The context in which the command was called.
+    ansn: str
+        Answer to the nth question
+    """
     global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers
     uid = ctx.author.id
     cid = ctx.channel.id
@@ -639,14 +865,17 @@ async def prelim_answer(ctx, ans1: str = None, ans2: str = None, ans3: str = Non
                 embed = discord.Embed(
                     title="Answers Submitted", description="Your answers have been submitted.", color=discord.Color.green()
                 )
+                embed.add_field(name="Remaining Time", value=f"{
+                    rem_time} seconds", inline=False)
+                await ctx.send(embed=embed, ephemeral=True)
                 break
             else:
                 embed = discord.Embed(
                     title="Answers Updated", description="Your answers have been updated.", color=discord.Color.green()
                 )
-            embed.add_field(name="Remaining Time", value=f"{
-                rem_time} seconds", inline=False)
-            await ctx.send(embed=embed, ephemeral=True)
+                embed.add_field(name="Remaining Time", value=f"{
+                    rem_time} seconds", inline=False)
+                await ctx.send(embed=embed, ephemeral=True)
     answers = [ans1, ans2, ans3, ans4, ans5, ans6, ans7, ans8, ans9, ans10,
                ans11, ans12, ans13, ans14, ans15, ans15, ans16, ans17, ans18, ans19, ans20]
     for i in range(len(asked)):
@@ -661,6 +890,16 @@ async def prelim_answer(ctx, ans1: str = None, ans2: str = None, ans3: str = Non
 @bot.hybrid_command(name="score", description="Get the score of a team.")
 @app_commands.describe(team_name="Name of the team")
 async def get_score(ctx, team_name: str):
+    """
+    Get the score of a team.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    team_name: str
+        Name of the team
+    """
     if team_name in teams:
         await ctx.send(f"Team {team_name} has {teams[team_name]['score']} points.")
     else:
@@ -670,6 +909,16 @@ async def get_score(ctx, team_name: str):
 @bot.hybrid_command(name="team", description="Register a new team.")
 @app_commands.describe(team_name="Name of the team")
 async def register_team(ctx, team_name: str):
+    """
+    Register a new team.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    team_name: str
+        Name of the team
+    """
     global teams, team_order
     if team_name in teams:
         await ctx.send("Team already exists.")
@@ -711,6 +960,16 @@ async def register_team(ctx, team_name: str):
 @bot.hybrid_command(name="join", description="Join an existing team.")
 @app_commands.describe(team_name="Name of the team to join")
 async def join_team(ctx, team_name: str):
+    """
+    Join an existing team.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    team_name: str
+        Name of the team 
+    """
     if team_name not in teams:
         await ctx.send("Team does not exist.")
     else:
@@ -723,6 +982,14 @@ async def join_team(ctx, team_name: str):
 
 @bot.hybrid_command(name="leave", description="Leave your team.")
 async def leave_team(ctx):
+    """
+    Leave the team the user is currently in.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command 
+    """
     global teams
     user = ctx.author
     for team, details in teams.items():
@@ -741,6 +1008,16 @@ async def leave_team(ctx):
 @bot.hybrid_command(name="remove_team", description="Remove a team.")
 @app_commands.describe(team_name="Name of the team to remove")
 async def remove_team(ctx, team_name: str):
+    """
+    Remove a team.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    team_name: str
+        Name of the team to remove    
+    """
     if team_name not in teams:
         await ctx.send("Team does not exist.")
     else:
@@ -761,6 +1038,18 @@ async def remove_team(ctx, team_name: str):
 
 
 async def update_team_score(user_id, channel_id, correct: bool):
+    """
+    Updates the score of the team based on the answer.
+
+    Parameters:
+    ----------
+    user_id: int
+        The id of the user who answered the question.
+    channel_id: int
+        The id of the channel where the question was asked.
+    correct: bool
+        A flag indicating if the answer was correct.
+    """
     team_name = None
     for team, details in teams.items():
         if user_id in details["members"]:
@@ -780,6 +1069,16 @@ async def update_team_score(user_id, channel_id, correct: bool):
 @bot.hybrid_command(name="answer", description="Submit your Answer to the question")
 @app_commands.describe(ans="Answer to the question")
 async def submit_answer(ctx, ans: str):
+    """
+    Submit the answer to the question.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    ans: str
+        The answer to the question.
+    """
     global current_question, current_mode, current_team, correct_teams, wrong_teams, rem_time, answered
     if current_mode == "bounce_pounce":
         user = ctx.author.id
@@ -827,6 +1126,22 @@ async def submit_answer(ctx, ans: str):
 @bot.hybrid_command(name="new", description="Add a new question to the set.")
 @app_commands.describe(ques_type="Type of question", question="The question text", options="Options for MCQ (comma separated)", answer="The correct answer")
 async def add_question(ctx, ques_type: str, question: str, options: str = None, answer: str = None):
+    """
+    Add a new question to the set.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    ques_type: str
+        The type of the question.
+    question: str
+        The question text. 
+    options: str
+        Options for MCQ (comma separated).
+    answer: str
+        The answer to the question
+    """
     global questions
     new_question = {
         "type": ques_type,
@@ -846,6 +1161,26 @@ async def add_question(ctx, ques_type: str, question: str, options: str = None, 
 @bot.hybrid_command(name="ask", description="Ask a question directly without adding to the set.")
 @app_commands.describe(ques_type="Type of question", question="The question text", mode="Bounce amd pounce(Optional)",  image_url="URL of the image", options="Options for MCQ (comma separated)", answers="The correct answer")
 async def ask_direct_question(ctx, ques_type: str, question: str, mode: str = None, image_url: str = None, options: str = None, answers: str = None):
+    """
+    Ask a question directly without adding to the set.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    ques_type: str
+        The type of the question.
+    question: str
+        The question text.  
+    mode: str
+        The mode of the question.   
+    image_url: str
+        URL of the image.   
+    options: str
+        Options for MCQ (comma separated).
+    answers: str
+        The answer to the question
+    """
     global current_question, current_mode, current_team, start_time
     current_mode = mode
     if ques_type == "mcq":

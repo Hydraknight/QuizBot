@@ -15,6 +15,7 @@ def generate_matrix(answer_matrix, output_path):
     cell_size = 40
     correct_color = (104, 255, 97)  # Pastel green
     wrong_color = (255, 102, 103)   # Pastel red
+    partial_color = (255, 255, 102)  # Pastel yellow
     text_color = (255, 255, 255)    # White
     bg_color = (0, 0, 0)            # Black
     padding = 20
@@ -88,7 +89,13 @@ def generate_matrix(answer_matrix, output_path):
     # Draw the matrix
     for i, (team, answers) in enumerate(answer_matrix.items()):
         for j, answer in enumerate(answers):
-            color = correct_color if answer == 1 else wrong_color
+            if answer == 1:
+                color = correct_color
+            elif answer == 0:
+                color = wrong_color
+            else:
+                color = partial_color
+
             top_left = (matrix_x_start + j * cell_size,
                         matrix_y_start + i * cell_size)
             bottom_right = (top_left[0] + cell_size, top_left[1] + cell_size)
