@@ -38,6 +38,7 @@ answered_right = []
 asked = []
 prelims_answers = []
 answer_matrix = {}
+points_matrix = {}
 team_answers = {}
 WRONG_ANSWER_PENALTY = -1
 CORRECT_ANSWER_POINTS = 2
@@ -84,7 +85,7 @@ async def load():
     If it is not, it checks if the current question is of type "guess" and if it is, it calls the handle_guess_answer function.
     If it is not, it checks if the current question is of type "multi" and if it is, it calls the handle_multiple_answer function.
     """
-    global questions, answer_matrix, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, points_matrix, answer_matrix, current_question, prelims_answers, total_time, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, asked, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
 
     if not os.path.exists('data'):
         os.makedirs('data')
@@ -111,6 +112,7 @@ async def load():
         team_answers = data["team_answers"]
         total_time = data["total_time"]
         answer_matrix = data["answer_matrix"]
+        points_matrix = data["points_matrix"]
         print("loaded data")
 
 
@@ -121,7 +123,7 @@ async def save():
     It then checks if the save files exist and if they do not, it creates them.
     If they do, it saves the data to the save files.
     """
-    global questions, answer_matrix, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, points_matrix, answer_matrix, total_time, current_question, team_answers, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     if not os.path.exists('data'):
         os.makedirs('data')
     if not os.path.exists('data/save1.json'):
@@ -146,7 +148,8 @@ async def save():
                     "prelims_answers": prelims_answers,
                     "team_answers": team_answers,
                     "total_time": total_time,
-                    "answer_matrix": answer_matrix
+                    "answer_matrix": answer_matrix,
+                    "points_matrix": points_matrix
                 }, f)
         return
 
@@ -172,7 +175,8 @@ async def save():
             "prelims_answers": prelims_answers,
             "team_answers": team_answers,
             "total_time": total_time,
-            "answer_matrix": answer_matrix
+            "answer_matrix": answer_matrix,
+            "points_matrix": points_matrix
         }, f)
 
 # Embed declarations
@@ -379,7 +383,7 @@ async def reset(ctx):
         ctx : context
             The context in which the command was called.
     """
-    global questions, answer_matrix, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
+    global questions, points_matrix,  answer_matrix, team_answers, total_time, asked, prelims_answers, current_question, teams, current_mode, start_time, current_team, rem_time, team_order, pounced, correct_teams, wrong_teams, attempted, WRONG_ANSWER_PENALTY, CORRECT_ANSWER_POINTS, answered
     questions = []
     current_question = None
     teams = {}
@@ -398,6 +402,7 @@ async def reset(ctx):
     prelims_answers = []
     team_answers = {}
     answer_matrix = {}
+    points_matrix = {}
     total_time = 120
     await save()
     await ctx.send("Quiz settings have been reset.")
@@ -750,7 +755,7 @@ async def handle_prelims(ctx):
         The context in which the command was called.
 
     """
-    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers, answer_matrix
+    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers, points_matrix, answer_matrix
     with open("prelims.json") as f:
         questions = json.load(f)
     # search for channel named quiz-log:
@@ -760,6 +765,7 @@ async def handle_prelims(ctx):
             title=f"Team {team} Answers", description="The answers submitted by the team are:", color=discord.Color(0x00ffff)
         )
         answer_matrix[team] = [0] * len(questions)
+        points_matrix[team] = [0] * len(questions)
         await channel.send(embed=embed)
         for i in range(len(questions)):
             qid = asked[i]
@@ -779,6 +785,7 @@ async def handle_prelims(ctx):
                                 )
                                 await channel.send(embed=embed)
                                 answer_matrix[team][i] = 1
+                                points_matrix[team][i] = question["points"]
                                 break
                         if flag == 0:
                             embed = discord.Embed(
@@ -786,10 +793,12 @@ async def handle_prelims(ctx):
                             )
                             await channel.send(embed=embed)
                             answer_matrix[team][i] = 0
+                            points_matrix[team][i] = 0
                     elif question["type"] == "multi":
                         attempt = list(team_answers[team][i].split(","))
                         correct_answers = question["answer"]
                         answer_matrix[team][i] = 0
+                        points_matrix[team][i] = 0
                         for guess in attempt:
                             guess = guess.strip()
                             flag = 0
@@ -804,9 +813,12 @@ async def handle_prelims(ctx):
                                     )
                                     await channel.send(embed=embed)
                                     answer_matrix[team][i] = 2
+                                    points_matrix[team][i] = question["points"] / \
+                                        len(correct_answers)
                                     correct_answers.remove(correct)
                                     if correct_answers == []:
                                         answer_matrix[team][i] = 1
+                                        points_matrix[team][i] = question["points"]
                                     break
                             if flag == 0:
                                 embed = discord.Embed(
@@ -904,6 +916,92 @@ async def get_score(ctx, team_name: str):
         await ctx.send(f"Team {team_name} has {teams[team_name]['score']} points.")
     else:
         await ctx.send("Team does not exist.")
+
+
+@bot.hybrid_command(name="modify", description="Modify the points of a question for a team.")
+@app_commands.describe(team_name="Name of the team", question="The question number", change_to="Correct/Wrong/Partial", points="The subquestion number")
+async def modify_points(ctx, team_name: str, question: int, change_to: str, points: int = None):
+    """
+    Modify the points of a question for a team.
+
+    Parameters:
+    ----------
+    ctx: context
+        The context in which the command was called.
+    team_name: str
+        Name of the team
+    question: int
+        The question number
+    change_to: str
+        Correct/Wrong/Partial
+    points: int
+        The subquestion number
+    """
+    global teams, team_answers, asked, answer_matrix, points_matrix
+    question -= 1
+    print(points_matrix)
+    if team_name not in teams:
+        await ctx.send("Team does not exist.")
+        return
+    if question > len(asked):
+        await ctx.send("Question does not exist.")
+        return
+    if change_to == "Correct":
+        qid = asked[question]
+        with open("prelims.json") as f:
+            questions = json.load(f)
+        for q in questions:
+            if q["id"] == qid:
+                if q["type"] == "guess":
+                    points_matrix[team_name][question] = q["points"]
+                    teams[team_name]['score'] = sum(points_matrix[team_name])
+                    answer_matrix[team_name][question] = 1
+                elif q["type"] == "multi":
+                    if points != None:
+                        points_matrix[team_name][question] = points
+                        answer_matrix[team_name][question] = 1
+                        teams[team_name]['score'] = sum(
+                            points_matrix[team_name])
+                    else:
+                        points_matrix[team_name][question] = q["points"]
+                        answer_matrix[team_name][question] = 1
+                        teams[team_name]['score'] = sum(
+                            points_matrix[team_name])
+
+                await ctx.send(f"Team {team_name} now has {teams[team_name]['score']} points.")
+                await save()
+                return
+    elif change_to == "Wrong":
+        qid = asked[question]
+        with open("prelims.json") as f:
+            questions = json.load(f)
+        for q in questions:
+            if q["id"] == qid:
+                answer_matrix[team_name][question] = 0
+                points_matrix[team_name][question] = 0
+                teams[team_name]['score'] = sum(points_matrix[team_name])
+                await ctx.send(f"Team {team_name} now has {teams[team_name]['score']} points.")
+                await save()
+                return
+    elif change_to == "Partial":
+        qid = asked[question]
+        with open("prelims.json") as f:
+            questions = json.load(f)
+        for q in questions:
+            if q["id"] == qid:
+                if q["type"] == "multi":
+                    if points != None:
+                        answer_matrix[team_name][question] = 2
+                        points_matrix[team_name][question] = points
+                        teams[team_name]['score'] = sum(
+                            points_matrix[team_name])
+
+                    else:
+                        await ctx.send("Please provide the subquestion number.")
+                        return
+                await ctx.send(f"Team {team_name} now has {teams[team_name]['score']} points.")
+                await save()
+                return
 
 
 @bot.hybrid_command(name="team", description="Register a new team.")
