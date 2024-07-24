@@ -1,0 +1,15 @@
+[
+  {
+    "id": 7,
+    "type": "uniquiz",
+    "question": "What are the countries starting with C",
+    "answer": [
+      ["Canada"],
+      ["China", "People's Republic of China"],
+      ["Croatia"],
+      ["Cuba"],
+      ["Cyprus"],
+      ["Czech Republic", "Czechia"]
+    ]
+  }
+]

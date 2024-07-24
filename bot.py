@@ -41,7 +41,7 @@ answer_matrix = {}
 points_matrix = {}
 team_answers = {}
 WRONG_ANSWER_PENALTY = -1
-CORRECT_ANSWER_POINTS = 2
+CORRECT_ANSWER_POINTS = 10
 CURRENT_TEAM_KEY = "current_team"
 answered = {}  # Initialize answered dictionary
 
@@ -396,7 +396,7 @@ async def reset(ctx):
     wrong_teams = []
     attempted = []
     WRONG_ANSWER_PENALTY = -1
-    CORRECT_ANSWER_POINTS = 2
+    CORRECT_ANSWER_POINTS = 10
     answered = {}
     asked = []
     prelims_answers = []
@@ -547,6 +547,54 @@ async def prelims(ctx):
             title="Question", description=question_text, color=discord.Color.greyple())
         await ctx.send(embed=embed)
         await save()
+
+
+@bot.hybrid_command(name="uniquiz",  description="Uniquiz format")
+async def prelims(ctx):
+    """
+    Handles the uniquiz format of the quiz.
+
+    Parameters
+    ----------
+        ctx : context
+            The context in which the command was called.
+    """
+    global current_question, current_team, answered, current_mode, start_time, total_time
+    with open("uniquiz.json") as f:
+        questions = json.load(f)
+    answered = {}
+    current_mode = "uniquiz"
+    # ask the question:
+    question = random.choice(questions)
+    current_question = question
+    current_question["channel_id"] = ctx.channel.id
+    question_text = current_question["question"]
+    embed = discord.Embed(
+        title="Question", description=f"{question_text}\n\nYou have 2 minutes to find unique answers to this question.", color=discord.Color.og_blurple())
+    await ctx.send(embed=embed)
+    start_time = datetime.datetime.now()
+    await save()
+    # wait for the answer:
+    total_time = 20
+    total = total_time
+    # timer embed which constantly updates:
+    timer = discord.Embed(
+        title="Time Remaining", description=f"{total} seconds remaining.", color=discord.Color.red()
+    )
+    timer.set_thumbnail(
+        url="https://media1.tenor.com/m/HAa_YXwM-e4AAAAC/jam.gif")
+    timer_message = await ctx.send(embed=timer)
+    while total > 0:
+        await asyncio.sleep(10)
+        total -= 10
+        timer.description = f"{total} seconds remaining."
+        await timer_message.edit(embed=timer)
+    await timer_message.delete()
+    timeup = discord.Embed(
+        title="Time's Up!", description="Time's up! The answers are being checked.", color=discord.Color.red()
+    )
+    await ctx.send(embed=timeup)
+    await handle_uniquiz_answer(ctx)
 
 
 async def mute_current_team(ctx):
@@ -778,7 +826,7 @@ async def handle_prelims(ctx):
                         for correct in correct_answers:
                             dist = distance(guess, correct.lower())
                             if dist/(len(correct)) <= 0.2:
-                                teams[team]["score"] += 2
+                                teams[team]["score"] += 10
                                 flag = 1
                                 embed = discord.Embed(
                                     title="Correct Answer", description=f"Team {team} got the correct answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{team_answers[team][i]}```**", color=discord.Color.green()
@@ -825,6 +873,15 @@ async def handle_prelims(ctx):
                                     title="Wrong Answer", description=f"Team {team} got the wrong answer for the question:\n\n**{question["question"]}**\n\n```Expected answer:```**```{(', '.join(map(str, question["answer"])))}```**\n```Team's answer:```**```{guess}```**", color=discord.Color.red()
                                 )
                                 await channel.send(embed=embed)
+        # clear all related variables except points_matrix:
+        current_question = None
+        current_team = 0
+        answered = {}
+        asked = []
+        team_answers = {}
+        start_time = None
+        total_time = 120
+        await save()
 
 # answer matrix:
 
@@ -1004,6 +1061,51 @@ async def modify_points(ctx, team_name: str, question: int, change_to: str, poin
                 return
 
 
+async def handle_uniquiz_answer(ctx):
+    """
+    Handles the logic of a team answering a question in the uniquiz format.
+
+    Parameters
+    ----------
+    ctx : context
+        The context in which the command was called.
+    """
+    global current_question, current_team, answered, current_mode, start_time, total_time, asked, team_answers, points_matrix, answer_matrix
+    freq = {}
+    print(team_answers)
+    channel = discord.utils.get(ctx.guild.text_channels, name="quiz-log")
+
+    correct_answers = current_question["answer"]
+    for team in team_answers:
+        for answer in team_answers[team]:
+            for correct in correct_answers:
+                for crt in correct:
+                    dist = distance(answer, crt)
+                    if dist/(len(crt)) <= 0.2:
+                        if answer not in freq:
+                            freq[crt] = 1
+                        else:
+                            freq[crt] += 1
+                        break
+
+    for team in team_answers:
+        for answer in team_answers[team]:
+            for correct in correct_answers:
+                for crt in correct:
+                    dist = distance(answer, crt)
+                    if dist/(len(crt)) <= 0.2:
+                        pts = CORRECT_ANSWER_POINTS
+                        teams[team]["score"] += pts//freq[crt]
+                        break
+        embed = discord.Embed(
+            title=f"Team {team}", description=f"The points of the team are: {teams[team]["score"]}", color=discord.Color(0x00ffff)
+        )
+
+        await channel.send(embed=embed)
+
+    return
+
+
 @bot.hybrid_command(name="team", description="Register a new team.")
 @app_commands.describe(team_name="Name of the team")
 async def register_team(ctx, team_name: str):
@@ -1177,7 +1279,7 @@ async def submit_answer(ctx, ans: str):
     ans: str
         The answer to the question.
     """
-    global current_question, current_mode, current_team, correct_teams, wrong_teams, rem_time, answered
+    global current_question, current_mode, current_team, correct_teams, wrong_teams, rem_time, answered, start_time, team_answers
     if current_mode == "bounce_pounce":
         user = ctx.author.id
         flag = 0
@@ -1217,6 +1319,32 @@ async def submit_answer(ctx, ans: str):
                 embed.add_field(name=f"{ctx.author}'s Answer:", value=ans)
                 await ctx.send(embed=embed)
             embed = None
+        elif current_question["type"] == "uniquiz":
+            user = ctx.author.id
+            for team in teams:
+                if user in teams[team]["members"]:
+                    if team not in team_answers:
+                        answerlist = [a.strip() for a in ans.split(',')]
+                        team_answers[team] = answerlist
+                        # time remaining:
+                        rem_time = total_time - \
+                            (datetime.datetime.now() - start_time).seconds
+                        embed = discord.Embed(
+                            title="Answers Submitted", description="Your answer has been submitted.\n\nYou can add more answers till your timer ends.", color=discord.Color.green())
+                        embed.add_field(name="Remaining Time", value=f"{
+                            rem_time} seconds", inline=False)
+                        await ctx.send(embed=embed, ephemeral=True)
+                    else:
+                        for a in ans.split(','):
+                            team_answers[team].append(a.strip())
+                        rem_time = total_time - \
+                            (datetime.datetime.now() - start_time).seconds
+                        embed = discord.Embed(
+                            title="Answers Updated", description="Your answer has been updated.\n\nYou can add more answers till your timer ends.", color=discord.Color.green())
+                        embed.add_field(name="Remaining Time", value=f"{
+                            rem_time} seconds", inline=False)
+                        await ctx.send(embed=embed, ephemeral=True)
+                    break
         else:
             await ctx.send("This command is only for Guess type questions.")
 
